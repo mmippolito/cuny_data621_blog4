@@ -1,0 +1,264 @@
+---
+title: "Blog4 - The Rising Number of CVEs"
+author: "Michael Ippolito"
+date: '2022-11-02'
+output: 
+  pdf_document:
+    dev: cairo_pdf
+    toc: yes
+  html_document:
+    theme: yeti
+    highlight: tango
+    toc: yes
+    toc_float: yes
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+
+```
+
+## Background
+
+As anyone familiar with the field of cybersecurity will tell you, it’s hard to keep up with the hackers. If your organization has data worth exploiting, someone will try to find a way to exploit it. Even if you do all the things you’re supposed to do (e.g. patch your systems, scan for vulnerabilities, perform penetration testing, train your users not to click suspicious links), someone will always try to develop a new way to break in. And with the growing number of applications and devices running those applications, the number of ways to exploit them is growing at an increasing rate.
+
+As a cybersecurity professional, I was interested in trying to gauge that rate in quantitative terms. This is helpful for a number of reasons, not least of which is how to evaluate the number of staff hours needed to assess the growing number of vulnerabilities. To that end, I built a model to analyze the trend in the number of vulnerabilities over time, as well as to predict the number of vulnerabilities we might see in the coming years.
+
+
+## Data
+
+The data I used comes from my organization’s vulnerability management system, which includes a knowledge base listing all the vulnerabilities it knows about. The list is contributed to by the collaborative cybersecurity community at large and is catalogued by the MITRE corporation with funding from the US federal government’s Cybersecurity and Infrastructure Security Agency (CISA). For tracking purposes, vulnerabilities are designated a CVE (common vulnerabilities and exposures) number.
+
+Each CVE entry contains a number of properties that quantify the type and severity of the vulnerability: things like whether there is functional or proof-of-concept code available to exploit the vulnerability, whether the software vendor has patched the vulnerability, whether the vulnerability can be exploited over the network or requires a physical presence on the machine, and whether the vulnerability requires local credentials on the device or if it can be exploited without authenticating.
+
+Based on the above (and other) criteria, CVEs are scored in terms of severity (from 0 to 10); the higher the score, the more serious the vulnerability. These scores are called common vulnerability scoring system (CVSS) scores and can be either version 2 or 3; most recently published vulnerabilities contain both versions, while older vulnerabilities published before v3 was released only have v2 scores.
+
+Scores of 7 to 10 typically indicate flaws that can be remotely exploited without needing credentials and which allow a remote attacker to execute arbitrary code on the device. Vulnerabilities with lower scores are often difficult to execute, require certain narrow criteria to be effective, or require a secondary attack to be successful (e.g. first luring a user to click on a malicious link, which would then direct the user to the attacker’s site where the exploit would be triggered).
+
+The following is a summary of relevant data catalogued in our vulnerability management system’s knowledgebase:
+
+```{r, fig.width=12, fig.height=7, include=FALSE}
+
+# Load data
+#df <- read.csv('/Users/ippolito/Box Sync/cuny/621-bus-analytics/blog4/kb-list.csv', header=T)
+df <- read.csv('C:/Users/micha/Box Sync/cuny/621-bus-analytics/blog4/kb-list.csv', header=T)
+
+# Remove rows with no CVE list
+df <- df %>%
+    filter(cve_list.cve.id != '-')
+
+# Separate into separate rows for each CVE
+df2 <- df %>% 
+    rename(cve=cve_list.cve.id) %>%
+    mutate(cve = gsub(x=cve, pattern=' ', replacement='')) %>%
+    separate_rows(cve, sep=',')
+
+# Change dashes to NA
+df2 <- df2 %>%
+    replace(. == '-', NA)
+
+# Date conversions (raw format is: Feb 21, 2019 @ 12:15:25.000)
+df2 <- df2 %>% 
+    mutate(modified=as.Date(last_service_modification_datetime, format='%b %d, %Y @ %H:%M:%S.000')) %>% 
+    mutate(published=as.Date(published_datetime, format='%b %d, %Y @ %H:%M:%S.000')) %>%
+    mutate(u_published=as.numeric(as.POSIXct(published)), u_modified=as.numeric(as.POSIXct(modified))) %>%
+    mutate(pub_month = as.numeric(strftime(published, '%m')), pub_year = as.numeric(strftime(published, '%Y'))) %>%
+    select(-last_service_modification_datetime, -published_datetime)
+
+# Convert scores to numeric
+df2$cvss.base <- as.numeric(df2$cvss.base)
+df2$cvss.temporal <- as.numeric(df2$cvss.temporal)
+df2$cvss_v3.base <- as.numeric(df2$cvss_v3.base)
+df2$cvss_v3.temporal <- as.numeric(df2$cvss_v3.temporal)
+
+# Factor categorical variables
+cols_to_factor <- names(df2)
+cols_to_exclude <- c('uid', 'cve', 'cvss.base', 'cvss.temporal', 'cvss.vector_string', 'cvss_v3.base', 'cvss_v3.temporal', 'cvss_v3.vector_string', 
+    'title', 'modified', 'published', 'u_modified', 'u_published', 'pub_month', 'pub_year')
+cols_to_factor <- cols_to_factor[! cols_to_factor %in% cols_to_exclude]
+df2[cols_to_factor] <- lapply(df2[cols_to_factor], factor)
+
+# Set factor levels
+levels(df2$cvss.access.complexity) <- c('Low', 'Medium', 'High')
+levels(df2$cvss.access.vector) <- c('Local', 'Adjacent Network', 'Network')
+levels(df2$cvss.authentication) <- c('None', 'Single', 'Multiple')
+levels(df2$cvss.exploitability) <- c('Unproven', 'Proof-of-Concept', 'Functional', 'High', 'Not Defined')
+levels(df2$cvss.impact.availability) <- c('None', 'Partial', 'Complete')
+levels(df2$cvss.impact.confidentiality) <- c('None', 'Partial', 'Complete')
+levels(df2$cvss.impact.integrity) <- c('None', 'Partial', 'Complete')
+levels(df2$cvss.remediation_level) <- c('Official Fix', 'Temporary Fix', 'Workaround', 'Unavailable', 'Not Defined')
+levels(df2$cvss.report_confidence) <- c('Unconfirmed', 'Uncorroborated', 'Confirmed', 'Not Defined')
+levels(df2$cvss_v3.attack.complexity) <- c('Low', 'High')
+levels(df2$cvss_v3.attack.vector) <- c('Network', 'Adjacent Network', 'Local', 'Physical')
+levels(df2$cvss_v3.exploit_code_maturity) <- c('Unproven', 'Proof-of-Concept', 'Functional', 'High', 'Not Defined')
+levels(df2$cvss_v3.impact.availability) <- c('None', 'Low', 'High')
+levels(df2$cvss_v3.impact.confidentiality) <- c('None', 'Low', 'High')
+levels(df2$cvss_v3.impact.integrity) <- c('None', 'Low', 'High')
+levels(df2$cvss_v3.privileges_required) <- c('None', 'Low', 'High')
+levels(df2$cvss_v3.remediation_level) <- c('Official Fix', 'Temporary Fix', 'Workaround', 'Unavailable', 'Not Defined')
+levels(df2$cvss_v3.report_confidence) <- c('Unconfirmed', 'Uncorroborated', 'Confirmed', 'Not Defined')
+levels(df2$cvss_v3.scope) <- c('Unchanged', 'Changed')
+levels(df2$cvss_v3.user_interaction) <- c('None', 'Required')
+levels(df2$patchable) <- c('No', 'Yes')
+
+# Drop cvss_v3 columns since there are > 76000 NAs, also drop NAs (14 observations)
+df2 <- df2 %>%
+    select(-starts_with('cvss_v3')) %>%
+    drop_na()
+
+```
+
+```{r echo=FALSE}
+
+# Summary
+summary(df2)
+
+```
+
+The data required some cleaning and wrangling to get it into this state, e.g. factoring the categorical variables, converting the published and modified dates, and converting CVSS scores to numeric values. Because older vulnerabilities don’t have CVSS v3 scores, I opted to discard v3 data and only use CVSS v2 data, which the vast majority of CVEs have (of the approximately 309,000 CVEs, only 14 didn’t contain fully populated CVSS v2 information, whereas 76,000 CVEs lacked CVSS v3 data).
+
+While there was a lot of data to work with, I focused on total CVE counts over time. As shown on the following histogram, the number of CVEs is growing at an exponential rate:
+
+```{r, fig.width=12, fig.height=7, echo=FALSE}
+
+# Histograms
+hist(as.Date(as.POSIXct(df2$u_published, origin="1970-01-01")), breaks='years', xlab='Published Date')
+
+```
+
+
+```{r, fig.width=12, fig.height=7, include=FALSE}
+
+# Histograms
+hist(df2$pub_year, xlab='Published Year')
+hist(df2$pub_month, xlab='Published Month')
+
+# Summarize by time period
+df3 <- df2 %>%
+    group_by(pub_year, pub_month) %>%
+    summarize(n=n(), .groups='keep') %>%
+    ungroup() %>%
+    mutate(pub_yrmo=as.numeric(as.POSIXct(paste(pub_year, pub_month, '01', sep='-'))))
+
+# Create a data frame containing all months from Jan 1999 until now to make sure we fill zeroes in for months when there were no cve's published
+tmp_pub_year <- c()
+tmp_pub_month <- c()
+tmp_pub_yrmo <- c()
+for (i in seq(1999, 2022)) {
+    for (j in seq(1, 12)) {
+        tmp_pub_year <- c(tmp_pub_year, i)
+        tmp_pub_month <- c(tmp_pub_month, j)
+        tmp_pub_yrmo <- c(tmp_pub_yrmo, as.numeric(as.POSIXct(paste(i, j, '01', sep='-'))))
+    }
+}
+df_tmp <- data.frame(pub_year=tmp_pub_year, pub_month=tmp_pub_month, pub_yrmo=tmp_pub_yrmo)
+
+# Merge with current counts and remove incomplete months and first month (count is erroneous; any cve with an unknown date was marked as published on 1/1/1999)
+df4 <- df3 %>%
+    merge(df_tmp, by=c('pub_year', 'pub_month', 'pub_yrmo'), all.y=T) %>%
+    mutate(n=ifelse(is.na(n), 0, n)) %>%
+    filter(!(pub_year == 1999 & pub_month == 1)) %>%
+    filter(!(pub_year == 2022 & pub_month == 11)) %>%
+    filter(!(pub_year == 2022 & pub_month == 12))
+
+```
+
+Converting the published date of each CVE to a Unix timestamp, I generated a scatter plot of vulnerability counts over time:
+
+```{r, fig.width=12, fig.height=7, echo=FALSE}
+
+# Plot cve count vs month published
+plot(n ~ as.Date(as.POSIXct(pub_yrmo, origin="1970-01-01")), xlab='Date', ylab='CVEs Published', data=df4)
+
+```
+
+Having these data points, I created a model to fit the data points.
+
+
+## Modeling
+
+Because this is rate-based data (vulnerabilities per month), I opted to use a generalized linear model using the Poisson family:
+
+```{r, fig.width=12, fig.height=7, echo=FALSE}
+
+# Linear model
+lmod <- lm(n ~ poly(pub_yrmo, degree=2), data=df4)
+summary(lmod)
+
+```
+
+
+```{r include=FALSE}
+
+# Plot residuals
+par(mfrow=c(2, 2))
+plot(lmod)
+
+# GLM/Poisson
+lmod2 <- glm(n ~ pub_yrmo, family=poisson(), data=df4)
+summary(lmod2)
+par(mfrow=c(2, 2))
+plot(lmod2)
+
+# Predict existing data for comparison
+df4$pred <- exp(predict(lmod2, newdata=data.frame(pub_yrmo=df4$pub_yrmo)))
+
+# Generate new values for the next two years
+tmp_pub_year <- c(2022, 2022)
+tmp_pub_month <- c(11, 12)
+tmp_pub_yrmo <- c(as.numeric(as.POSIXct('2022-11-01')), as.numeric(as.POSIXct('2022-12-01')))
+for (i in seq(2023, 2025)) {
+    for (j in seq(1, 12)) {
+        tmp_pub_year <- c(tmp_pub_year, i)
+        tmp_pub_month <- c(tmp_pub_month, j)
+        tmp_pub_yrmo <- c(tmp_pub_yrmo, as.numeric(as.POSIXct(paste(i, j, '01', sep='-'))))
+    }
+}
+df_tmp <- data.frame(pub_year=tmp_pub_year, pub_month=tmp_pub_month, pub_yrmo=tmp_pub_yrmo)
+df_tmp$n <- exp(predict(lmod2, newdata=data.frame(pub_yrmo=df_tmp$pub_yrmo)))
+
+# Predict future cve counts
+df5 <- df4 %>%
+    merge(df_tmp, by=c('pub_year', 'pub_month', 'pub_yrmo'), all=T) %>%
+    rename(n=n.x) %>%
+    mutate(n=ifelse(is.na(n.y), n, n.y)) %>%
+    select(-n.y) %>%
+    mutate(fv=ifelse(pub_year > 2022 | (pub_year == 2022 & pub_month > 10), 2, 1)) %>%
+    mutate(pred=ifelse(is.na(pred), n, pred))
+
+# Table of counts
+df6 <- df5 %>%
+    filter(pub_month == 12 & pub_year > 2018) %>%
+    select(pub_year, pub_month, n, fv) %>%
+    rename(future_value=fv, published_cve_count=n) %>%
+    mutate(published_cve_count=round(published_cve_count, -2))
+df6$future_value <- factor(df6$future_value)
+levels(df6$future_value) = c('No', 'Yes')
+
+```
+
+Using the model output parameters, I ran predictions for the next two years. The following table summarizes the predicted values for December of each of the preceding three years and the next three years:
+
+```{r echo=FALSE}
+
+# Table of counts
+df6
+
+```
+
+As shown on the following plot, there is a sharp upward trend in the number of vulnerabilities to be published in the near future:
+
+```{r echo=FALSE}
+
+# Plot cve count vs month published
+par(mfrow=c(1, 1))
+plot(n ~ as.Date(as.POSIXct(pub_yrmo, origin="1970-01-01")), col=fv, xlab='Date', ylab='CVEs Published', data=df5)
+
+```
+
+
+## Conclusion
+
+As expected, the number of vulnerabilities published is growing dramatically over time. Based on the model’s predictions, we can expect approximately 6,900 CVEs to be published in 2023, 8,600 in 2023, and 10,600 in 2024, compared with the 5,600 expected by the end of 2022. While a more rigorous analysis should be performed if these projections are to be used for concrete budget or staffing purposes, these numbers may serve as a general estimate.
