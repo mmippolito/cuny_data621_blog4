@@ -9,4 +9,4 @@ As anyone familiar with the field of cybersecurity will tell you, it’s hard to
 As a cybersecurity professional, I was interested in trying to gauge that rate in quantitative terms. This is helpful for a number of reasons, not least of which is how to evaluate the number of staff hours needed to assess the growing number of vulnerabilities. To that end, I built a model to analyze the trend in the number of vulnerabilities over time, as well as to predict the number of vulnerabilities we might see in the coming years.<br />
 <br />
 
-[Link to PDF](https://github.com/mmippolito/cuny_data621_blog4/blob/main/blog4.pdf)
+[Link to full PDF](https://github.com/mmippolito/cuny_data621_blog4/blob/main/blog4.pdf)
