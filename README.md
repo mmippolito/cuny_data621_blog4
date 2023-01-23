@@ -2,7 +2,7 @@
 CUNY DATA621<br />
 Blog #4</h2>
 <br />
-<h2>A Poisson Model to Forecast the Rising Number of CVEs</h2>
+<h2>A Poisson Model to Forecast the Increasing Number of Computer Vulnerabilities</h2>
 <br />
 <h3>Introduction</h3>
 <br />
