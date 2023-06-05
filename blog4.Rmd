@@ -172,6 +172,20 @@ Converting the published date of each CVE to a Unix timestamp, I generated a sca
 # Plot cve count vs month published
 plot(n ~ as.Date(as.POSIXct(pub_yrmo, origin="1970-01-01")), xlab='Date', ylab='CVEs Published', data=df4)
 
+
+```
+
+```{r include=FALSE}
+
+# Investigate two outliers
+df4 %>% filter(n > 8000)
+df2 %>% filter(published >= '2020-06-01' & published < '2020-07-01') %>%
+    group_by(category) %>%
+    summarize(n=n())
+df2 %>% filter(published >= '2022-06-01' & published < '2022-07-01') %>%
+    group_by(category) %>%
+    summarize(n=n())
+
 ```
 
 Having these data points, I created a model to fit the data points.
@@ -181,24 +195,29 @@ Having these data points, I created a model to fit the data points.
 
 Because this is rate-based data (vulnerabilities per month), I opted to use a generalized linear model using the Poisson family:
 
-```{r, fig.width=12, fig.height=7, echo=FALSE}
+```{r, fig.width=12, fig.height=7, include=FALSE}
 
 # Linear model
 lmod <- lm(n ~ poly(pub_yrmo, degree=2), data=df4)
 summary(lmod)
 
-```
-
-
-```{r include=FALSE}
-
 # Plot residuals
 par(mfrow=c(2, 2))
 plot(lmod)
 
+```
+
+```{r fig.width=12, fig.height=7, echo=FALSE}
+
 # GLM/Poisson
 lmod2 <- glm(n ~ pub_yrmo, family=poisson(), data=df4)
 summary(lmod2)
+
+```
+
+```{r, fig.width=12, fig.height=7, include=FALSE}
+
+# Residuals
 par(mfrow=c(2, 2))
 plot(lmod2)
 
@@ -261,4 +280,4 @@ plot(n ~ as.Date(as.POSIXct(pub_yrmo, origin="1970-01-01")), col=fv, xlab='Date'
 
 ## Conclusion
 
-As expected, the number of vulnerabilities published is growing dramatically over time. Based on the model’s predictions, we can expect approximately 6,900 CVEs to be published in 2023, 8,600 in 2023, and 10,600 in 2024, compared with the 5,600 expected by the end of 2022. While a more rigorous analysis should be performed if these projections are to be used for concrete budget or staffing purposes, these numbers may serve as a general estimate.
+As expected, the number of vulnerabilities published is growing dramatically over time. Based on the model’s predictions, we can expect approximately 6,900 CVEs to be published in 2023, 8,600 in 2024, and 10,600 in 2025, compared with the 5,600 expected by the end of 2022. While a more rigorous analysis should be performed if these projections are to be used for concrete budget or staffing purposes, these numbers may serve as a general estimate.
